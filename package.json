@@ -1,0 +1,51 @@
+{
+  "name": "@capglyph/sdk",
+  "version": "0.1.0",
+  "description": "CapGlyph TypeScript SDK — Local (WASM) + API (capglyphd) with conformance vectors",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:wasm": "echo 'TODO: wasm-pack build --target web --out-dir wasm from ../capglyph-core (see wasm/README.md)'",
+    "test": "vitest run",
+    "test:conformance": "vitest run tests/conformance.test.ts",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "capglyph",
+    "watermark",
+    "stego",
+    "credential",
+    "wasm",
+    "cbor",
+    "hmac"
+  ],
+  "author": "CapGlyph Authors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CapGlyph/capglyph-sdk-js.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
