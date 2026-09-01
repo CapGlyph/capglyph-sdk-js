@@ -1,6 +1,6 @@
 {
   "name": "@capglyph/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CapGlyph TypeScript SDK \u2014 Local (WASM) + API (capglyphd) with conformance vectors",
   "type": "module",
   "main": "dist/index.js",
