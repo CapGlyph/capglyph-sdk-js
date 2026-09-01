@@ -74,10 +74,8 @@ function encodeBstr(payload: Uint8Array): Uint8Array {
   return out;
 }
 
-export function cborEncode(
-  payload: Uint8Array,
-  params: FramingParams,
-): Uint8Array {
+export function cborEncode(payload: Uint8Array, params: FramingParams): Uint8Array {
+  if (payload.length > 0xffff) throw new Error("payload too large");
   const parts: Uint8Array[] = [
     Uint8Array.of(0x85), // array 5
     encodeUint(params.version),
@@ -107,12 +105,15 @@ function decodeUintAt(data: Uint8Array, p: { off: number }): number {
   if (ai <= 23) return ai;
   if (ai === 24) {
     if (p.off >= data.length) throw new Error("truncated uint 1");
-    return data[p.off++];
+    const value = data[p.off++];
+    if (value < 24) throw new Error("non-canonical integer");
+    return value;
   }
   if (ai === 25) {
     if (p.off + 2 > data.length) throw new Error("truncated uint 2");
     const v = (data[p.off] << 8) | data[p.off + 1];
     p.off += 2;
+    if (v <= 0xff) throw new Error("non-canonical integer");
     return v;
   }
   if (ai === 26) {
@@ -123,6 +124,7 @@ function decodeUintAt(data: Uint8Array, p: { off: number }): number {
       (data[p.off + 2] << 8) +
       data[p.off + 3];
     p.off += 4;
+    if (v <= 0xffff) throw new Error("non-canonical integer");
     return v;
   }
   if (ai === 27) {
@@ -131,6 +133,7 @@ function decodeUintAt(data: Uint8Array, p: { off: number }): number {
     let v = 0;
     for (let i = 0; i < 8; i++) v = v * 256 + data[p.off + i];
     p.off += 8;
+    if (v <= 0xffffffff) throw new Error("non-canonical integer");
     return v;
   }
   throw new Error(`unsupported ai ${ai}`);
@@ -158,10 +161,12 @@ export function cborDecode(frame: Uint8Array): {
   else if (ai === 24) {
     if (p.off >= frame.length) throw new Error("truncated bstr len 1");
     blen = frame[p.off++];
+    if (blen < 24) throw new Error("non-canonical bstr length");
   } else if (ai === 25) {
     if (p.off + 2 > frame.length) throw new Error("truncated bstr len 2");
     blen = (frame[p.off] << 8) | frame[p.off + 1];
     p.off += 2;
+    if (blen <= 0xff) throw new Error("non-canonical bstr length");
   } else if (ai === 26) {
     if (p.off + 4 > frame.length) throw new Error("truncated bstr len 4");
     blen =
@@ -170,21 +175,21 @@ export function cborDecode(frame: Uint8Array): {
       (frame[p.off + 2] << 8) +
       frame[p.off + 3];
     p.off += 4;
+    if (blen <= 0xffff) throw new Error("non-canonical bstr length");
   } else if (ai === 27) {
     if (p.off + 8 > frame.length) throw new Error("truncated bstr len 8");
     blen = 0;
     for (let i = 0; i < 8; i++) blen = blen * 256 + frame[p.off + i];
     p.off += 8;
+    if (blen <= 0xffffffff) throw new Error("non-canonical bstr length");
   } else throw new Error("indefinite bstr not allowed");
   if (p.off + blen > frame.length) throw new Error("truncated bstr payload");
   const payload = frame.slice(p.off, p.off + blen);
   p.off += blen;
-  if (p.off !== frame.length)
-    throw new Error(`trailing bytes ${frame.length - p.off}`);
+  if (p.off !== frame.length) throw new Error(`trailing bytes ${frame.length - p.off}`);
   if (payloadLen !== blen)
-    throw new Error(
-      `payload_len mismatch header ${payloadLen} vs bstr ${blen}`,
-    );
+    throw new Error(`payload_len mismatch header ${payloadLen} vs bstr ${blen}`);
+  if (payloadLen > 0xffff) throw new Error("payload_len out of range");
   if (version !== 1) throw new Error(`unsupported version ${version}`);
   const payloadType = PayloadTypeFromId[ptypeId];
   if (!payloadType) throw new Error(`unknown PayloadType ${ptypeId}`);
@@ -194,8 +199,7 @@ export function cborDecode(frame: Uint8Array): {
 
 export function cborValidate(frame: Uint8Array): FrameHeader {
   const { header } = cborDecode(frame);
-  if (header.version !== 1)
-    throw new Error(`unsupported version ${header.version}`);
+  if (header.version !== 1) throw new Error(`unsupported version ${header.version}`);
   return header;
 }
 
@@ -208,27 +212,16 @@ export function hmacTag(frame: Uint8Array, kMac: Uint8Array): Uint8Array {
   return new Uint8Array(mac.digest());
 }
 
-export function hmacVerify(
-  frame: Uint8Array,
-  tag: Uint8Array,
-  kMac: Uint8Array,
-): void {
+export function hmacVerify(frame: Uint8Array, tag: Uint8Array, kMac: Uint8Array): void {
   const expected = hmacTag(frame, kMac);
-  if (
-    expected.length !== tag.length ||
-    !timingSafeEqual(Buffer.from(expected), Buffer.from(tag))
-  ) {
+  if (expected.length !== tag.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(tag))) {
     throw new Error("HMAC verification failed");
   }
 }
 
 // -- High-level seal/open ------------------------------------------
 
-export function seal(
-  payload: Uint8Array,
-  params: FramingParams,
-  kMac: Uint8Array,
-): Uint8Array {
+export function seal(payload: Uint8Array, params: FramingParams, kMac: Uint8Array): Uint8Array {
   const frame = cborEncode(payload, params);
   const tag = hmacTag(frame, kMac);
   const out = new Uint8Array(frame.length + 32);
@@ -246,8 +239,7 @@ export function open(
   const tag = sealed.slice(sealed.length - 32);
   hmacVerify(frame, tag, kMac);
   const { header, payload } = cborDecode(frame);
-  if (header.version !== 1)
-    throw new Error(`unsupported version ${header.version}`);
+  if (header.version !== 1) throw new Error(`unsupported version ${header.version}`);
   return { header, payload };
 }
 
@@ -269,8 +261,7 @@ export function hexToBytes(hex: string): Uint8Array {
   if (hex === "") return new Uint8Array(0);
   if (hex.length % 2 !== 0) throw new Error("odd hex length");
   const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++)
-    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
@@ -312,7 +303,6 @@ export function classifyError(msg: string): string {
   if (m.includes("revoked") || m.includes("e_revoked")) return "E_REVOKED";
   if (m.includes("consumed") || m.includes("e_consumed")) return "E_CONSUMED";
   if (m.includes("tampered") || m.includes("e_tampered")) return "E_TAMPERED";
-  if (m.includes("geometry") || m.includes("e_geometry_mismatch"))
-    return "E_GEOMETRY_MISMATCH";
+  if (m.includes("geometry") || m.includes("e_geometry_mismatch")) return "E_GEOMETRY_MISMATCH";
   return "E_INTERNAL";
 }

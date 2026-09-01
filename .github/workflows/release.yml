@@ -1,0 +1,49 @@
+name: Publish JS SDK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: CapGlyph/capglyph-test-vectors
+          path: capglyph-test-vectors
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_version="${GITHUB_REF_NAME#v}"
+          package_version=$(node -p "require('./package.json').version")
+          test "$package_version" = "$expected_version"
+
+      - run: npm install
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+        env:
+          CAPGLYPH_VECTORS: ../capglyph-test-vectors/vectors
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
